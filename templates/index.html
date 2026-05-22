@@ -1375,10 +1375,24 @@
       { key: 'fifty_two_week_low',  label: '52W Low', num: true  },
     ];
 
-    function TableView({ stocks, onRemove, onRowClick, onEditThemes, onBulkTheme }) {
-      const [sortKey, setSortKey] = useState('symbol');
-      const [sortDir, setSortDir] = useState(1);
+    function TableView({ stocks, onRemove, onRowClick, onThemesSaved }) {
+      const [sortKey, setSortKey]           = useState('symbol');
+      const [sortDir, setSortDir]           = useState(1);
       const [selectedRows, setSelectedRows] = useState(new Set());
+      const [addInput, setAddInput]         = useState('');
+      const [themesToAdd, setThemesToAdd]   = useState([]);
+      const [themesToRemove, setThemesToRemove] = useState(new Set());
+      const [saving, setSaving]             = useState(false);
+      const [saved, setSaved]               = useState(false);
+
+      // Reset theme editor whenever selection changes
+      const selectedKey = [...selectedRows].sort().join(',');
+      useEffect(() => {
+        setThemesToAdd([]);
+        setThemesToRemove(new Set());
+        setAddInput('');
+        setSaved(false);
+      }, [selectedKey]);
 
       const handleSort = (key) => {
         if (sortKey === key) setSortDir(d => -d);
@@ -1409,6 +1423,45 @@
         else setSelectedRows(new Set(sorted.map(s => s.symbol)));
       };
 
+      // Theme editor derived values
+      const selectedStocks   = stocks.filter(s => selectedRows.has(s.symbol));
+      const existingThemes   = [...new Set(selectedStocks.flatMap(s => s.themes || []))];
+      const visibleExisting  = existingThemes.filter(t => !themesToRemove.has(t));
+      const suggestions      = [...new Set(selectedStocks.flatMap(s => getSuggestions(s)))]
+                                 .filter(s => !themesToAdd.includes(s) && !existingThemes.includes(s));
+      const isDirty          = themesToAdd.length > 0 || themesToRemove.size > 0;
+
+      const queueAdd = (tag) => {
+        const t = tag.trim();
+        if (!t) return;
+        if (themesToRemove.has(t)) {
+          setThemesToRemove(prev => { const n = new Set(prev); n.delete(t); return n; });
+        } else if (!themesToAdd.includes(t) && !existingThemes.includes(t)) {
+          setThemesToAdd(prev => [...prev, t]);
+        }
+        setAddInput('');
+        setSaved(false);
+      };
+
+      const handleSave = async () => {
+        setSaving(true);
+        for (const stock of selectedStocks) {
+          const current = stock.themes || [];
+          const merged  = [...new Set([...current.filter(t => !themesToRemove.has(t)), ...themesToAdd])];
+          await fetch(`/api/watchlist/${stock.symbol}`, {
+            method: 'PATCH', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ themes: merged }),
+          });
+        }
+        setSaving(false);
+        setSaved(true);
+        setThemesToAdd([]);
+        setThemesToRemove(new Set());
+        onThemesSaved && onThemesSaved([...selectedRows]);
+        setTimeout(() => setSaved(false), 2000);
+      };
+
       const renderCell = (stock, col) => {
         const v = stock[col.key];
         switch (col.key) {
@@ -1430,11 +1483,8 @@
             <td key={col.key}>
               <div style={{display:'flex', flexWrap:'wrap', gap:3, minWidth:80}}>
                 {(stock.themes || []).map(t => (
-                  <span key={t} className="theme-chip" style={{fontSize:10, padding:'1px 6px'}}
-                    onClick={e => { e.stopPropagation(); onEditThemes(stock); }}>{t}</span>
+                  <span key={t} className="theme-chip" style={{fontSize:10, padding:'1px 6px'}}>{t}</span>
                 ))}
-                <span className="theme-chip-add" style={{fontSize:10, padding:'1px 6px'}}
-                  onClick={e => { e.stopPropagation(); onEditThemes(stock); }}>+ theme</span>
               </div>
             </td>
           );
@@ -1447,13 +1497,106 @@
 
       return (
         <>
-          {selectedRows.size > 0 && (
-            <div style={{background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, padding:'8px 16px', margin:'12px 0 4px', display:'flex', alignItems:'center', gap:12}}>
-              <span style={{fontSize:13, color:'var(--text)', fontWeight:600}}>{selectedRows.size} selected</span>
-              <button className="btn btn-secondary btn-sm" onClick={() => onBulkTheme([...selectedRows])}>Set Theme</button>
-              <button className="btn btn-secondary btn-sm" style={{marginLeft:'auto'}} onClick={() => setSelectedRows(new Set())}>Clear</button>
+          {/* ── Inline Theme Editor ── */}
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 10, padding: '14px 18px', marginBottom: 12,
+          }}>
+            {/* Header row */}
+            <div style={{display:'flex', alignItems:'center', gap:10, marginBottom: selectedRows.size > 0 ? 12 : 0}}>
+              <span style={{fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.5px', whiteSpace:'nowrap'}}>Themes</span>
+              {selectedRows.size === 0 ? (
+                <span style={{fontSize:12, color:'var(--muted)'}}>← Select rows below to add or remove themes</span>
+              ) : (
+                <span style={{fontSize:12, color:'var(--blue)', fontWeight:600}}>
+                  {selectedRows.size} asset{selectedRows.size > 1 ? 's' : ''} selected
+                </span>
+              )}
+              {isDirty && (
+                <button className="btn btn-primary btn-sm" style={{marginLeft:'auto'}}
+                  onClick={handleSave} disabled={saving}>
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              )}
+              {!isDirty && saved && (
+                <span style={{fontSize:12, color:'var(--green)', marginLeft:'auto'}}>Saved ✓</span>
+              )}
+              {selectedRows.size > 0 && (
+                <button className="btn btn-secondary btn-sm" style={{marginLeft: isDirty || saved ? 8 : 'auto'}}
+                  onClick={() => setSelectedRows(new Set())}>Clear</button>
+              )}
             </div>
-          )}
+
+            {selectedRows.size > 0 && (
+              <>
+                {/* Current themes (with remove) */}
+                {(visibleExisting.length > 0 || themesToRemove.size > 0) && (
+                  <div style={{display:'flex', flexWrap:'wrap', gap:6, marginBottom:10, alignItems:'center'}}>
+                    <span style={{fontSize:11, color:'var(--muted)', whiteSpace:'nowrap', minWidth:56}}>Current:</span>
+                    {visibleExisting.map(t => (
+                      <span key={t} className="theme-chip-removable" style={{fontSize:11}}>
+                        {t}
+                        <button onClick={() => { setThemesToRemove(prev => new Set([...prev, t])); setSaved(false); }}>×</button>
+                      </span>
+                    ))}
+                    {[...themesToRemove].map(t => (
+                      <span key={t} title="Click to undo" style={{
+                        display:'inline-flex', alignItems:'center', gap:5,
+                        background:'#2d1517', border:'1px solid var(--red)', color:'var(--red)',
+                        fontSize:11, fontWeight:600, padding:'3px 8px', borderRadius:14,
+                        textDecoration:'line-through', opacity:0.7, cursor:'pointer',
+                      }} onClick={() => { setThemesToRemove(prev => { const n = new Set(prev); n.delete(t); return n; }); setSaved(false); }}>
+                        {t} ↩
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add themes */}
+                <div style={{display:'flex', flexWrap:'wrap', gap:6, alignItems:'center'}}>
+                  <span style={{fontSize:11, color:'var(--muted)', whiteSpace:'nowrap', minWidth:56}}>Add:</span>
+                  {themesToAdd.map(t => (
+                    <span key={t} style={{
+                      display:'inline-flex', alignItems:'center', gap:5,
+                      background:'#1a3020', border:'1px solid var(--green)', color:'var(--green)',
+                      fontSize:11, fontWeight:600, padding:'3px 8px', borderRadius:14,
+                    }}>
+                      +{t}
+                      <button style={{background:'none', border:'none', color:'var(--green)', cursor:'pointer', fontSize:12, lineHeight:1, padding:0}}
+                        onClick={() => { setThemesToAdd(prev => prev.filter(x => x !== t)); setSaved(false); }}>×</button>
+                    </span>
+                  ))}
+                  <input
+                    className="form-input"
+                    style={{width:180, padding:'4px 8px', fontSize:12}}
+                    placeholder="Type theme, Enter to add…"
+                    value={addInput}
+                    onChange={e => setAddInput(e.target.value)}
+                    onKeyDown={e => {
+                      if ((e.key === 'Enter' || e.key === ',') && addInput.trim()) {
+                        e.preventDefault(); queueAdd(addInput);
+                      }
+                    }}
+                  />
+                  {addInput.trim() && (
+                    <button className="btn btn-secondary btn-sm" onClick={() => queueAdd(addInput)}>Add</button>
+                  )}
+                </div>
+
+                {/* Suggestions */}
+                {suggestions.length > 0 && (
+                  <div style={{display:'flex', flexWrap:'wrap', gap:6, marginTop:10, alignItems:'center'}}>
+                    <span style={{fontSize:11, color:'var(--muted)', whiteSpace:'nowrap', minWidth:56}}>Suggested:</span>
+                    {suggestions.slice(0, 8).map(s => (
+                      <span key={s} className="suggestion-chip" onClick={() => queueAdd(s)}>+ {s}</span>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* ── Table ── */}
           <div className="table-wrapper">
             <table>
               <thead>
@@ -1725,7 +1868,6 @@
       const [newPw, setNewPw]               = useState('');
       const [pwMsg, setPwMsg]               = useState('');
       const [showLegal, setShowLegal]       = useState(null); // 'terms' | 'privacy'
-      const [bulkThemeSymbols, setBulkThemeSymbols] = useState(null);
 
       // Check auth on mount
       useEffect(() => {
@@ -1914,8 +2056,7 @@
                 stocks={filtered}
                 onRemove={handleRemove}
                 onRowClick={setDetailStock}
-                onEditThemes={setThemeStock}
-                onBulkTheme={setBulkThemeSymbols}
+                onThemesSaved={() => fetchWatchlist(true)}
               />
             ) : (
               <div className="stock-grid">
@@ -1956,21 +2097,6 @@
               stock={themeStock}
               onClose={() => setThemeStock(null)}
               onSave={handleThemeSave}
-            />
-          )}
-
-          {bulkThemeSymbols && (
-            <BulkThemeModal
-              symbols={bulkThemeSymbols}
-              watchlist={watchlist}
-              onClose={() => setBulkThemeSymbols(null)}
-              onSave={(syms, themes) => {
-                setWatchlist(prev => prev.map(s =>
-                  syms.includes(s.symbol)
-                    ? { ...s, themes: [...new Set([...(s.themes || []), ...themes])] }
-                    : s
-                ));
-              }}
             />
           )}
 
