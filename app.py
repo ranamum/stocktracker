@@ -2,7 +2,7 @@ import atexit
 import os
 from datetime import datetime, timedelta
 from functools import wraps
-from flask import Flask, jsonify, request, send_from_directory, make_response
+from flask import Flask, jsonify, request, send_from_directory, make_response, g
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -32,6 +32,7 @@ def require_auth(f):
         session = database.get_session_user(token)
         if not session:
             return jsonify({'error': 'Session expired'}), 401
+        g.session_user = session
         return f(*args, **kwargs)
     return decorated
 
@@ -143,7 +144,7 @@ def logout():
 # ---------------------------------------------------------------------------
 
 def refresh_all_data():
-    watchlist = database.get_watchlist()
+    watchlist = database.get_all_watched_symbols()
     print(f"[scheduler] Refreshing {len(watchlist)} symbol(s)...")
     for item in watchlist:
         symbol = item['symbol']
@@ -183,7 +184,8 @@ def test_page():
 @app.route('/api/watchlist', methods=['GET'])
 @require_auth
 def get_watchlist():
-    watchlist = database.get_watchlist()
+    user_id  = g.session_user['user_id']
+    watchlist = database.get_watchlist(user_id)
     all_data  = database.get_all_asset_data()
     result = []
     for item in watchlist:
@@ -196,12 +198,13 @@ def get_watchlist():
 @app.route('/api/watchlist', methods=['POST'])
 @require_auth
 def add_to_watchlist():
-    body   = request.json or {}
-    symbol = (body.get('symbol') or '').upper().strip()
+    user_id = g.session_user['user_id']
+    body    = request.json or {}
+    symbol  = (body.get('symbol') or '').upper().strip()
     if not symbol:
         return jsonify({'error': 'symbol is required'}), 400
 
-    existing = [w['symbol'] for w in database.get_watchlist()]
+    existing = [w['symbol'] for w in database.get_watchlist(user_id)]
     if symbol in existing:
         return jsonify({'error': f'{symbol} is already in your watchlist'}), 400
 
@@ -209,7 +212,7 @@ def add_to_watchlist():
     if not data:
         return jsonify({'error': f'Could not find data for "{symbol}". Check the ticker symbol.'}), 404
 
-    database.add_to_watchlist(symbol, data.get('name', symbol), data.get('asset_type', 'EQUITY'))
+    database.add_to_watchlist(user_id, symbol, data.get('name', symbol), data.get('asset_type', 'EQUITY'))
     database.save_asset_data(symbol, data)
     return jsonify({'success': True, 'data': data})
 
@@ -217,17 +220,19 @@ def add_to_watchlist():
 @app.route('/api/watchlist/<symbol>', methods=['DELETE'])
 @require_auth
 def remove_from_watchlist(symbol):
-    database.remove_from_watchlist(symbol.upper())
+    user_id = g.session_user['user_id']
+    database.remove_from_watchlist(user_id, symbol.upper())
     return jsonify({'success': True})
 
 
 @app.route('/api/watchlist/<symbol>', methods=['PATCH'])
 @require_auth
 def update_watchlist_item(symbol):
+    user_id = g.session_user['user_id']
     body = request.json or {}
     if 'themes' in body:
         themes = [t.strip() for t in body['themes'] if isinstance(t, str) and t.strip()]
-        database.update_themes(symbol.upper(), themes)
+        database.update_themes(user_id, symbol.upper(), themes)
     return jsonify({'success': True})
 
 

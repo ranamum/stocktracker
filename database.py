@@ -35,11 +35,13 @@ def init_db():
     if PG:
         cur.execute('''
             CREATE TABLE IF NOT EXISTS watchlist (
-                symbol      TEXT PRIMARY KEY,
+                user_id     INTEGER NOT NULL,
+                symbol      TEXT NOT NULL,
                 name        TEXT,
                 asset_type  TEXT,
                 themes      TEXT DEFAULT '[]',
-                added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, symbol)
             )
         ''')
         cur.execute('''
@@ -79,10 +81,12 @@ def init_db():
     else:
         cur.execute('''
             CREATE TABLE IF NOT EXISTS watchlist (
-                symbol      TEXT PRIMARY KEY,
+                user_id     INTEGER NOT NULL,
+                symbol      TEXT NOT NULL,
                 name        TEXT,
                 asset_type  TEXT,
-                added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                added_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, symbol)
             )
         ''')
         cur.execute('''
@@ -121,6 +125,10 @@ def init_db():
         ''')
         try:
             cur.execute('ALTER TABLE watchlist ADD COLUMN themes TEXT DEFAULT "[]"')
+        except Exception:
+            pass
+        try:
+            cur.execute('ALTER TABLE watchlist ADD COLUMN user_id INTEGER DEFAULT 0')
         except Exception:
             pass
     conn.commit()
@@ -231,13 +239,13 @@ def delete_session(token):
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
-def get_watchlist():
+def get_watchlist(user_id):
     conn = _conn()
     if PG:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     else:
         cur = conn.cursor()
-    cur.execute('SELECT * FROM watchlist ORDER BY added_at')
+    cur.execute(_q('SELECT * FROM watchlist WHERE user_id=? ORDER BY added_at'), (user_id,))
     rows = _fetchall(cur)
     cur.close()
     conn.close()
@@ -246,31 +254,42 @@ def get_watchlist():
     return rows
 
 
-def update_themes(symbol, themes):
+def get_all_watched_symbols():
+    """Returns all unique symbols across all users — used by the scheduler."""
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute('SELECT DISTINCT symbol FROM watchlist')
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [{'symbol': r[0]} for r in rows]
+
+
+def update_themes(user_id, symbol, themes):
     conn = _conn()
     cur = conn.cursor()
     cur.execute(
-        _q('UPDATE watchlist SET themes = ? WHERE symbol = ?'),
-        (json.dumps(themes), symbol.upper())
+        _q('UPDATE watchlist SET themes = ? WHERE user_id = ? AND symbol = ?'),
+        (json.dumps(themes), user_id, symbol.upper())
     )
     conn.commit()
     cur.close()
     conn.close()
 
 
-def add_to_watchlist(symbol, name, asset_type):
+def add_to_watchlist(user_id, symbol, name, asset_type):
     conn = _conn()
     cur = conn.cursor()
     try:
         if PG:
             cur.execute(
-                'INSERT INTO watchlist (symbol, name, asset_type) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING',
-                (symbol.upper(), name, asset_type)
+                'INSERT INTO watchlist (user_id, symbol, name, asset_type) VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING',
+                (user_id, symbol.upper(), name, asset_type)
             )
         else:
             cur.execute(
-                'INSERT OR IGNORE INTO watchlist (symbol, name, asset_type) VALUES (?, ?, ?)',
-                (symbol.upper(), name, asset_type)
+                'INSERT OR IGNORE INTO watchlist (user_id, symbol, name, asset_type) VALUES (?, ?, ?, ?)',
+                (user_id, symbol.upper(), name, asset_type)
             )
         conn.commit()
         return True
@@ -281,11 +300,10 @@ def add_to_watchlist(symbol, name, asset_type):
         conn.close()
 
 
-def remove_from_watchlist(symbol):
+def remove_from_watchlist(user_id, symbol):
     conn = _conn()
     cur = conn.cursor()
-    cur.execute(_q('DELETE FROM watchlist WHERE symbol = ?'), (symbol.upper(),))
-    cur.execute(_q('DELETE FROM asset_data WHERE symbol = ?'), (symbol.upper(),))
+    cur.execute(_q('DELETE FROM watchlist WHERE user_id = ? AND symbol = ?'), (user_id, symbol.upper()))
     conn.commit()
     cur.close()
     conn.close()
