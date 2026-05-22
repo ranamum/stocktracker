@@ -1478,10 +1478,11 @@
                 {sorted.map(stock => (
                   <tr key={stock.symbol} onClick={() => onRowClick(stock)}
                     style={selectedRows.has(stock.symbol) ? {background:'#111c2a'} : {}}>
-                    <td style={{padding:'10px 8px 10px 14px'}} onClick={e => toggleRow(stock.symbol, e)}>
+                    <td style={{padding:'10px 8px 10px 14px'}}>
                       <input type="checkbox" style={{accentColor:'var(--blue)', cursor:'pointer'}}
                         checked={selectedRows.has(stock.symbol)}
-                        onChange={e => toggleRow(stock.symbol, e)} />
+                        onChange={e => toggleRow(stock.symbol, e)}
+                        onClick={e => e.stopPropagation()} />
                     </td>
                     {COLUMNS.map(col => renderCell(stock, col))}
                     <td className="remove-cell">
