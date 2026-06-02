@@ -15,16 +15,54 @@ REC_MAP = {
 }
 
 
+def _fast_info_fallback(ticker, symbol):
+    """Build a minimal info dict from fast_info + history when ticker.info fails."""
+    try:
+        fi = ticker.fast_info
+        price = getattr(fi, 'last_price', None)
+        prev  = getattr(fi, 'previous_close', None)
+        if not price:
+            hist  = ticker.history(period='2d')
+            if hist.empty:
+                return None
+            price = float(hist['Close'].iloc[-1])
+            prev  = float(hist['Close'].iloc[-2]) if len(hist) >= 2 else price
+        return {
+            'quoteType':        getattr(fi, 'quote_type', None) or 'EQUITY',
+            'symbol':           symbol,
+            'shortName':        symbol,
+            'currentPrice':     price,
+            'previousClose':    prev,
+            'marketCap':        getattr(fi, 'market_cap', None),
+            'fiftyTwoWeekHigh': getattr(fi, 'fifty_two_week_high', None),
+            'fiftyTwoWeekLow':  getattr(fi, 'fifty_two_week_low', None),
+            'currency':         getattr(fi, 'currency', 'USD') or 'USD',
+            'volume':           getattr(fi, 'last_volume', None),
+        }
+    except Exception as e:
+        print(f"[data_fetcher] fast_info fallback failed for {symbol}: {e}")
+        return None
+
+
 def get_asset_data(symbol):
     try:
         ticker = yf.Ticker(symbol)
-        info = ticker.info
 
-        # Bail early if Yahoo returned a truly empty/error response
-        has_price = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
+        # Try full info first; fall back to fast_info if Yahoo blocks the request
+        try:
+            info = ticker.info or {}
+        except Exception as e:
+            print(f"[data_fetcher] ticker.info failed for {symbol}: {e}")
+            info = {}
+
+        has_price    = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
         has_identity = info.get('quoteType') or info.get('symbol') or info.get('shortName')
-        if not info or (not has_price and not has_identity):
-            return None
+
+        if not has_price and not has_identity:
+            print(f"[data_fetcher] ticker.info empty for {symbol}, trying fast_info")
+            info = _fast_info_fallback(ticker, symbol)
+            if not info:
+                return None
 
         asset_type = info.get('quoteType') or 'EQUITY'
 
