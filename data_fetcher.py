@@ -1,10 +1,38 @@
+import threading
+import time
 import yfinance as yf
 import requests
 from datetime import datetime
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://finance.yahoo.com/',
 }
+
+# Yahoo Finance session / crumb cache (refreshed hourly)
+_sess_lock = threading.Lock()
+_sess_cache = {'session': None, 'crumb': None, 'ts': 0}
+
+def _get_yahoo_session():
+    with _sess_lock:
+        if _sess_cache['crumb'] and time.time() - _sess_cache['ts'] < 3600:
+            return _sess_cache['session'], _sess_cache['crumb']
+        try:
+            s = requests.Session()
+            s.headers.update(HEADERS)
+            s.get('https://finance.yahoo.com/', timeout=10)
+            r = s.get('https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=10)
+            crumb = r.text.strip() if r.status_code == 200 else ''
+            if crumb and crumb not in ('null', 'Unauthorized', ''):
+                _sess_cache.update({'session': s, 'crumb': crumb, 'ts': time.time()})
+                print(f'[data_fetcher] Yahoo session ready, crumb acquired')
+            else:
+                print(f'[data_fetcher] Could not get crumb: {r.status_code} {r.text[:50]}')
+        except Exception as e:
+            print(f'[data_fetcher] Session init failed: {e}')
+        return _sess_cache['session'], _sess_cache['crumb']
 
 REC_MAP = {
     'strong_buy': 'Strong Buy',
@@ -22,10 +50,15 @@ def _quotesummary_fallback(symbol):
     including P/E, EPS, short interest, analyst consensus, etc.
     """
     try:
+        session, crumb = _get_yahoo_session()
         modules = 'price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,assetProfile'
-        resp = requests.get(
-            f'https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}',
-            params={'modules': modules},
+        params = {'modules': modules}
+        if crumb:
+            params['crumb'] = crumb
+        req = session if session else requests
+        resp = req.get(
+            f'https://query2.finance.yahoo.com/v11/finance/quoteSummary/{symbol}',
+            params=params,
             headers=HEADERS,
             timeout=10,
         )
