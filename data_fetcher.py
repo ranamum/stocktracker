@@ -15,14 +15,96 @@ REC_MAP = {
 }
 
 
-def _fast_info_fallback(ticker, symbol):
-    """Build a minimal info dict from fast_info + history when ticker.info fails."""
+def _quotesummary_fallback(symbol):
+    """
+    Fetch full data via Yahoo Finance quoteSummary API directly.
+    More reliable than ticker.info on cloud servers — returns all metrics
+    including P/E, EPS, short interest, analyst consensus, etc.
+    """
     try:
-        fi = ticker.fast_info
+        modules = 'price,summaryDetail,defaultKeyStatistics,financialData,recommendationTrend,assetProfile'
+        resp = requests.get(
+            f'https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}',
+            params={'modules': modules},
+            headers=HEADERS,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        result = resp.json().get('quoteSummary', {}).get('result', [])
+        if not result:
+            return None
+        r = result[0]
+
+        def v(section, key):
+            d = r.get(section) or {}
+            val = d.get(key)
+            return val.get('raw') if isinstance(val, dict) else val
+
+        price_data = r.get('price', {})
+        summary    = r.get('summaryDetail', {})
+        key_stats  = r.get('defaultKeyStatistics', {})
+        fin_data   = r.get('financialData', {})
+        profile    = r.get('assetProfile', {})
+
+        rec_key   = (v('financialData', 'recommendationKey') or '').lower()
+        consensus = REC_MAP.get(rec_key, rec_key.replace('_', ' ').title() if rec_key else None)
+
+        price    = v('price', 'regularMarketPrice')
+        prev     = v('summaryDetail', 'previousClose') or v('price', 'regularMarketPreviousClose')
+
+        info = {
+            'quoteType':               v('price', 'quoteType') or 'EQUITY',
+            'symbol':                  symbol,
+            'shortName':               v('price', 'shortName') or symbol,
+            'longName':                v('price', 'longName') or v('price', 'shortName') or symbol,
+            'currentPrice':            price,
+            'previousClose':           prev,
+            'currency':                v('price', 'currency') or 'USD',
+            'marketCap':               v('price', 'marketCap') or v('summaryDetail', 'marketCap'),
+            'trailingPE':              v('summaryDetail', 'trailingPE'),
+            'forwardPE':               v('summaryDetail', 'forwardPE'),
+            'pegRatio':                v('defaultKeyStatistics', 'pegRatio'),
+            'trailingPegRatio':        v('defaultKeyStatistics', 'trailingPegRatio'),
+            'targetMeanPrice':         v('financialData', 'targetMeanPrice'),
+            'targetHighPrice':         v('financialData', 'targetHighPrice'),
+            'targetLowPrice':          v('financialData', 'targetLowPrice'),
+            'recommendationKey':       rec_key,
+            '_consensus':              consensus,
+            'numberOfAnalystOpinions': v('financialData', 'numberOfAnalystOpinions'),
+            'sector':                  profile.get('sector', ''),
+            'industry':                profile.get('industry', ''),
+            'website':                 profile.get('website', ''),
+            'country':                 profile.get('country', ''),
+            'fullTimeEmployees':       profile.get('fullTimeEmployees'),
+            'longBusinessSummary':     (profile.get('longBusinessSummary') or '')[:600],
+            'volume':                  v('price', 'regularMarketVolume'),
+            'averageVolume':           v('summaryDetail', 'averageVolume'),
+            'fiftyTwoWeekHigh':        v('summaryDetail', 'fiftyTwoWeekHigh'),
+            'fiftyTwoWeekLow':         v('summaryDetail', 'fiftyTwoWeekLow'),
+            'dividendYield':           v('summaryDetail', 'dividendYield'),
+            'beta':                    v('summaryDetail', 'beta'),
+            'trailingEps':             v('defaultKeyStatistics', 'trailingEps'),
+            'forwardEps':              v('defaultKeyStatistics', 'forwardEps'),
+            'sharesShort':             v('defaultKeyStatistics', 'sharesShort'),
+            'shortPercentOfFloat':     v('defaultKeyStatistics', 'shortPercentOfFloat'),
+            'shortRatio':              v('defaultKeyStatistics', 'shortRatio'),
+        }
+        if not info['currentPrice']:
+            return None
+        return info
+    except Exception as e:
+        print(f"[data_fetcher] quoteSummary fallback failed for {symbol}: {e}")
+        return None
+
+
+def _fast_info_fallback(ticker, symbol):
+    """Last-resort fallback using fast_info + history (price only, no fundamentals)."""
+    try:
+        fi    = ticker.fast_info
         price = getattr(fi, 'last_price', None)
         prev  = getattr(fi, 'previous_close', None)
         if not price:
-            hist  = ticker.history(period='2d')
+            hist = ticker.history(period='2d')
             if hist.empty:
                 return None
             price = float(hist['Close'].iloc[-1])
@@ -48,7 +130,7 @@ def get_asset_data(symbol):
     try:
         ticker = yf.Ticker(symbol)
 
-        # Try full info first; fall back to fast_info if Yahoo blocks the request
+        # 1. Try yfinance ticker.info (best data, sometimes blocked on cloud)
         try:
             info = ticker.info or {}
         except Exception as e:
@@ -58,9 +140,14 @@ def get_asset_data(symbol):
         has_price    = info.get('currentPrice') or info.get('regularMarketPrice') or info.get('previousClose')
         has_identity = info.get('quoteType') or info.get('symbol') or info.get('shortName')
 
+        # 2. If ticker.info is empty, try direct quoteSummary API (full fundamentals)
         if not has_price and not has_identity:
-            print(f"[data_fetcher] ticker.info empty for {symbol}, trying fast_info")
-            info = _fast_info_fallback(ticker, symbol)
+            print(f"[data_fetcher] ticker.info empty for {symbol}, trying quoteSummary API")
+            info = _quotesummary_fallback(symbol)
+            if not info:
+                # 3. Last resort: fast_info (price only)
+                print(f"[data_fetcher] quoteSummary failed for {symbol}, trying fast_info")
+                info = _fast_info_fallback(ticker, symbol)
             if not info:
                 return None
 
@@ -80,8 +167,12 @@ def get_asset_data(symbol):
         else:
             change_pct = None
 
-        rec_key = (info.get('recommendationKey') or '').lower()
-        analyst_consensus = REC_MAP.get(rec_key, rec_key.replace('_', ' ').title() if rec_key else None)
+        # _consensus is pre-computed by _quotesummary_fallback; otherwise derive from recommendationKey
+        if info.get('_consensus'):
+            analyst_consensus = info['_consensus']
+        else:
+            rec_key = (info.get('recommendationKey') or '').lower()
+            analyst_consensus = REC_MAP.get(rec_key, rec_key.replace('_', ' ').title() if rec_key else None)
 
         data = {
             'symbol': symbol.upper(),
