@@ -826,6 +826,22 @@
               <div className="metric-label">Target Price</div>
               <div className="metric-value">{fmt.price(stock.target_price, stock.currency)}</div>
             </div>
+            <div className="metric-item">
+              <div className="metric-label">EPS (TTM)</div>
+              <div className="metric-value">{fmt.num(stock.eps)}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Analysts</div>
+              <div className="metric-value">{stock.num_analysts != null ? stock.num_analysts : 'N/A'}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Short % Float</div>
+              <div className="metric-value">{stock.short_percent_float != null ? (stock.short_percent_float * 100).toFixed(1) + '%' : 'N/A'}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Short Ratio</div>
+              <div className="metric-value">{fmt.num(stock.short_ratio)}</div>
+            </div>
           </div>
 
           <div className="consensus-row">
@@ -917,12 +933,16 @@
                   ['Target Price', fmt.price(stock.target_price, stock.currency)],
                   ['Target High',  fmt.price(stock.target_high, stock.currency)],
                   ['Target Low',   fmt.price(stock.target_low, stock.currency)],
-                  ['EPS (TTM)',    fmt.num(stock.eps)],
-                  ['Fwd EPS',      fmt.num(stock.forward_eps)],
-                  ['Beta',         fmt.num(stock.beta)],
-                  ['Volume',       fmt.vol(stock.volume)],
-                  ['Avg Volume',   fmt.vol(stock.avg_volume)],
-                  ['Dividend Yld', stock.dividend_yield != null ? (stock.dividend_yield * 100).toFixed(2) + '%' : 'N/A'],
+                  ['EPS (TTM)',      fmt.num(stock.eps)],
+                  ['Fwd EPS',        fmt.num(stock.forward_eps)],
+                  ['# Analysts',     stock.num_analysts != null ? stock.num_analysts : 'N/A'],
+                  ['Short % Float',  stock.short_percent_float != null ? (stock.short_percent_float * 100).toFixed(1) + '%' : 'N/A'],
+                  ['Short Ratio',    fmt.num(stock.short_ratio)],
+                  ['Shares Short',   stock.shares_short != null ? fmt.vol(stock.shares_short) : 'N/A'],
+                  ['Beta',           fmt.num(stock.beta)],
+                  ['Volume',         fmt.vol(stock.volume)],
+                  ['Avg Volume',     fmt.vol(stock.avg_volume)],
+                  ['Dividend Yld',   stock.dividend_yield != null ? (stock.dividend_yield * 100).toFixed(2) + '%' : 'N/A'],
                 ].map(([label, val]) => (
                   <div key={label}>
                     <div className="detail-metric-label">{label}</div>
@@ -1368,11 +1388,15 @@
       { key: 'pe_ratio',         label: 'P/E',        num: true  },
       { key: 'peg_ratio',        label: 'PEG',        num: true  },
       { key: 'target_price',     label: 'Target',     num: true  },
-      { key: 'analyst_consensus',label: 'Consensus',  num: false },
-      { key: 'themes',           label: 'Themes',     num: false },
-      { key: 'volume',           label: 'Volume',     num: true  },
-      { key: 'fifty_two_week_high', label: '52W High',num: true  },
-      { key: 'fifty_two_week_low',  label: '52W Low', num: true  },
+      { key: 'analyst_consensus',    label: 'Consensus',     num: false },
+      { key: 'num_analysts',         label: 'Analysts',      num: true  },
+      { key: 'eps',                  label: 'EPS (TTM)',     num: true  },
+      { key: 'short_percent_float',  label: 'Short % Float', num: true  },
+      { key: 'short_ratio',          label: 'Short Ratio',   num: true  },
+      { key: 'themes',               label: 'Themes',        num: false },
+      { key: 'volume',               label: 'Volume',        num: true  },
+      { key: 'fifty_two_week_high',  label: '52W High',      num: true  },
+      { key: 'fifty_two_week_low',   label: '52W Low',       num: true  },
     ];
 
     function TableView({ stocks, onRemove, onRowClick, onThemesSaved }) {
@@ -1479,6 +1503,10 @@
           case 'peg_ratio':   return <td key={col.key} className="num">{fmt.num(v)}</td>;
           case 'target_price':return <td key={col.key} className="num">{fmt.price(v, stock.currency)}</td>;
           case 'analyst_consensus': return <td key={col.key}><ConsensusBadge consensus={v} /></td>;
+          case 'num_analysts':    return <td key={col.key} className="num">{v != null ? v : 'N/A'}</td>;
+          case 'eps':             return <td key={col.key} className="num">{fmt.num(v)}</td>;
+          case 'short_percent_float': return <td key={col.key} className="num">{v != null ? (v * 100).toFixed(1) + '%' : 'N/A'}</td>;
+          case 'short_ratio':     return <td key={col.key} className="num">{fmt.num(v)}</td>;
           case 'themes': return (
             <td key={col.key}>
               <div style={{display:'flex', flexWrap:'wrap', gap:3, minWidth:80}}>
