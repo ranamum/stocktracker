@@ -285,6 +285,61 @@ def get_competitors(symbol):
     return jsonify(competitors)
 
 
+@app.route('/api/debug/fetch/<symbol>', methods=['GET'])
+def debug_fetch(symbol):
+    secret = os.environ.get('ADMIN_SECRET')
+    if not secret or request.args.get('key') != secret:
+        return jsonify({'error': 'Unauthorized'}), 401
+    import yfinance as yf, traceback
+    results = {}
+    sym = symbol.upper()
+
+    # Test 1: ticker.info
+    try:
+        t = yf.Ticker(sym)
+        info = t.info or {}
+        results['ticker_info'] = {
+            'keys': len(info),
+            'quoteType': info.get('quoteType'),
+            'currentPrice': info.get('currentPrice'),
+            'shortName': info.get('shortName'),
+        }
+    except Exception as e:
+        results['ticker_info'] = {'error': str(e)}
+
+    # Test 2: crumb
+    try:
+        session, crumb = data_fetcher._get_yahoo_session()
+        results['crumb'] = crumb[:10] + '...' if crumb else None
+        results['session_ok'] = session is not None
+    except Exception as e:
+        results['crumb'] = {'error': str(e)}
+
+    # Test 3: quoteSummary
+    try:
+        qs = data_fetcher._quotesummary_fallback(sym)
+        results['quotesummary'] = {
+            'got_data': qs is not None,
+            'currentPrice': qs.get('currentPrice') if qs else None,
+            'trailingPE': qs.get('trailingPE') if qs else None,
+        }
+    except Exception as e:
+        results['quotesummary'] = {'error': str(e), 'trace': traceback.format_exc()}
+
+    # Test 4: fast_info
+    try:
+        t2 = yf.Ticker(sym)
+        fi = t2.fast_info
+        results['fast_info'] = {
+            'last_price': getattr(fi, 'last_price', None),
+            'market_cap': getattr(fi, 'market_cap', None),
+        }
+    except Exception as e:
+        results['fast_info'] = {'error': str(e)}
+
+    return jsonify(results)
+
+
 @app.route('/api/admin/users', methods=['GET'])
 def admin_users():
     secret = os.environ.get('ADMIN_SECRET')
