@@ -323,18 +323,27 @@ def remove_from_watchlist(user_id, symbol):
 
 
 def save_asset_data(symbol, data):
+    # Merge with existing record: keep old non-None values for any field
+    # that came back None in the new fetch (e.g. when fast_info fallback was used)
+    existing = get_asset_data(symbol)
+    if existing:
+        existing.pop('last_updated', None)
+        merged = {**existing, **{k: v for k, v in data.items() if v is not None}}
+    else:
+        merged = data
+
     conn = _conn()
     cur = conn.cursor()
     if PG:
         cur.execute(
             '''INSERT INTO asset_data (symbol, data, updated_at) VALUES (%s, %s, %s)
                ON CONFLICT (symbol) DO UPDATE SET data=EXCLUDED.data, updated_at=EXCLUDED.updated_at''',
-            (symbol.upper(), json.dumps(data), datetime.now().isoformat())
+            (symbol.upper(), json.dumps(merged), datetime.now().isoformat())
         )
     else:
         cur.execute(
             'INSERT OR REPLACE INTO asset_data (symbol, data, updated_at) VALUES (?, ?, ?)',
-            (symbol.upper(), json.dumps(data), datetime.now().isoformat())
+            (symbol.upper(), json.dumps(merged), datetime.now().isoformat())
         )
     conn.commit()
     cur.close()
