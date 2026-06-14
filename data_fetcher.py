@@ -56,12 +56,20 @@ def _quotesummary_fallback(symbol):
         if crumb:
             params['crumb'] = crumb
         req = session if session else requests
+        # Try v10 first (works for crypto), fall back to v11
         resp = req.get(
-            f'https://query2.finance.yahoo.com/v11/finance/quoteSummary/{symbol}',
+            f'https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}',
             params=params,
             headers=HEADERS,
             timeout=10,
         )
+        if resp.status_code in (401, 403, 404):
+            resp = req.get(
+                f'https://query2.finance.yahoo.com/v11/finance/quoteSummary/{symbol}',
+                params=params,
+                headers=HEADERS,
+                timeout=10,
+            )
         resp.raise_for_status()
         result = resp.json().get('quoteSummary', {}).get('result', [])
         if not result:
