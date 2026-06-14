@@ -15,19 +15,43 @@ HEADERS = {
 _sess_lock = threading.Lock()
 _sess_cache = {'session': None, 'crumb': None, 'ts': 0}
 
+# Try curl_cffi first (handles TLS fingerprinting, works on Render)
+try:
+    from curl_cffi import requests as cffi_requests
+    _HAS_CFFI = True
+    print('[data_fetcher] curl_cffi available — using for Yahoo session')
+except ImportError:
+    _HAS_CFFI = False
+
 def _get_yahoo_session():
     with _sess_lock:
         if _sess_cache['crumb'] and time.time() - _sess_cache['ts'] < 3600:
             return _sess_cache['session'], _sess_cache['crumb']
+
+        # Method 1: curl_cffi (bypasses TLS fingerprint blocking)
+        if _HAS_CFFI:
+            try:
+                s = cffi_requests.Session(impersonate='chrome')
+                s.get('https://finance.yahoo.com/', timeout=10)
+                r = s.get('https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=10)
+                crumb = r.text.strip() if r.status_code == 200 else ''
+                if crumb and '{' not in crumb and crumb not in ('null', 'Unauthorized', ''):
+                    _sess_cache.update({'session': s, 'crumb': crumb, 'ts': time.time()})
+                    print(f'[data_fetcher] Yahoo session ready via curl_cffi, crumb acquired')
+                    return _sess_cache['session'], _sess_cache['crumb']
+            except Exception as e:
+                print(f'[data_fetcher] curl_cffi session failed: {e}')
+
+        # Method 2: plain requests (works locally, may fail on cloud)
         try:
             s = requests.Session()
             s.headers.update(HEADERS)
             s.get('https://finance.yahoo.com/', timeout=10)
             r = s.get('https://query2.finance.yahoo.com/v1/test/getcrumb', timeout=10)
             crumb = r.text.strip() if r.status_code == 200 else ''
-            if crumb and crumb not in ('null', 'Unauthorized', ''):
+            if crumb and '{' not in crumb and crumb not in ('null', 'Unauthorized', ''):
                 _sess_cache.update({'session': s, 'crumb': crumb, 'ts': time.time()})
-                print(f'[data_fetcher] Yahoo session ready, crumb acquired')
+                print(f'[data_fetcher] Yahoo session ready via requests, crumb acquired')
             else:
                 print(f'[data_fetcher] Could not get crumb: {r.status_code} {r.text[:50]}')
         except Exception as e:
