@@ -464,6 +464,49 @@
     .row-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 4px 6px; border-radius: 4px; transition: color 0.15s; }
     .row-remove:hover { color: var(--red); }
 
+    /* Morningstar stars */
+    .morningstar-badge {
+      display: inline-flex; align-items: center; gap: 1px;
+      font-size: 14px; letter-spacing: 1px;
+      padding: 2px 6px; border-radius: 10px;
+      background: #2a2510;
+    }
+    .morningstar-badge .star-filled { color: var(--yellow); }
+    .morningstar-badge .star-empty  { color: #3a3a3a; }
+
+    /* Category chips (fund) */
+    .category-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; align-items: center; }
+    .category-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #1e222a; border: 1px solid #3a3a4a;
+      color: var(--purple); font-size: 10px; font-weight: 600;
+      padding: 2px 8px; border-radius: 12px; letter-spacing: 0.3px;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .category-chip:hover { background: #2a2a3a; border-color: var(--purple); }
+    .category-chip.active { background: #2d2438; border-color: var(--purple); }
+    .category-chip-add {
+      background: none; border: 1px dashed #3a3a4a;
+      color: #6a6a8a; font-size: 11px;
+      padding: 3px 10px; border-radius: 12px;
+      cursor: pointer; transition: all 0.15s; font-weight: 500;
+    }
+    .category-chip-add:hover { border-color: var(--purple); color: var(--purple); background: #1a1a2a; }
+
+    /* Tab bar */
+    .tab-bar { display: flex; gap: 0; padding: 0 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+    .tab-btn {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      color: var(--muted); padding: 10px 20px; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all 0.15s; letter-spacing: 0.3px;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--blue); border-bottom-color: var(--blue); }
+    .tab-count {
+      font-size: 10px; background: var(--bg); border: 1px solid var(--border);
+      padding: 1px 6px; border-radius: 10px; margin-left: 6px; font-weight: 500;
+    }
+
     /* Refresh indicator */
     .refreshing-bar {
       height: 2px;
@@ -786,6 +829,22 @@
       return <span className={`type-badge ${cls}`}>{type === 'MUTUALFUND' ? 'FUND' : (type || 'EQUITY')}</span>;
     }
 
+    // ─── MorningstarBadge ───────────────────────────────────────────────────
+    function MorningstarBadge({ rating }) {
+      if (rating == null) return <span style={{color:'var(--muted)', fontSize:12}}>N/A</span>;
+      const r = Math.max(1, Math.min(5, Math.round(rating)));
+      return (
+        <span className="morningstar-badge">
+          {[1,2,3,4,5].map(i => (
+            <span key={i} className={i <= r ? 'star-filled' : 'star-empty'}>★</span>
+          ))}
+        </span>
+      );
+    }
+
+    // ─── Fund category constants ──────────────────────────────────────────────
+    const FUND_CATEGORIES = ['Large Cap', 'Bond', 'Index', 'Target Date', 'International', 'Sector', 'Money Market'];
+
     // ─── StockCard ───────────────────────────────────────────────────────────
     function StockCard({ stock, onRemove, onClick, onEditThemes }) {
       const pos = stock.change_pct >= 0;
@@ -967,19 +1026,28 @@
               )}
               <TypeBadge type={stock.asset_type} />
             </div>
+            {stock.asset_type === 'MUTUALFUND' && stock.nav_date && (
+              <div style={{fontSize:11, color:'var(--muted)', marginTop:-16, marginBottom:16}}>NAV as of {stock.nav_date}</div>
+            )}
 
             {/* Fund factors (mutual funds) */}
             {stock.asset_type === 'MUTUALFUND' && (
               <div className="detail-section">
                 <div className="detail-section-title">Fund Factors</div>
                 <div className="detail-metrics">
+                  <div>
+                    <div className="detail-metric-label">Morningstar</div>
+                    <div className="detail-metric-value"><MorningstarBadge rating={stock.morningstar_rating} /></div>
+                  </div>
                   {[
                     ['Expense Ratio', stock.expense_ratio != null ? (stock.expense_ratio * 100).toFixed(2) + '%' : 'N/A'],
                     ['YTD Return',    stock.ytd_return != null ? (stock.ytd_return * 100).toFixed(1) + '%' : 'N/A'],
+                    ['1Y Return',     stock.one_year_return != null ? (stock.one_year_return * 100).toFixed(1) + '%' : 'N/A'],
                     ['3Y Avg Return', stock.three_year_return != null ? (stock.three_year_return * 100).toFixed(1) + '%' : 'N/A'],
                     ['5Y Avg Return', stock.five_year_return != null ? (stock.five_year_return * 100).toFixed(1) + '%' : 'N/A'],
-                    ['Total Assets',  fmt.cap(stock.total_assets)],
+                    ['Net Assets',    fmt.cap(stock.total_assets)],
                     ['Yield',         stock.fund_yield != null ? (stock.fund_yield * 100).toFixed(2) + '%' : 'N/A'],
+                    ['Turnover',      stock.turnover != null ? (stock.turnover * 100).toFixed(0) + '%' : 'N/A'],
                     ['Category',      stock.category || 'N/A'],
                     ['Fund Family',   stock.fund_family || 'N/A'],
                   ].map(([label, val]) => (
@@ -1745,6 +1813,348 @@
       );
     }
 
+    // ─── FundCard ──────────────────────────────────────────────────────────
+    function FundCard({ stock, onRemove, onClick, onEditCategory }) {
+      const pos = stock.change_pct >= 0;
+      return (
+        <div className="stock-card" onClick={() => onClick(stock)}>
+          <div className="card-header">
+            <div>
+              <div className="card-symbol">{stock.symbol}</div>
+              <div className="card-name" title={stock.name}>{stock.name}</div>
+              <TypeBadge type={stock.asset_type} />
+            </div>
+            <button className="card-remove" title="Remove"
+              onClick={e => { e.stopPropagation(); onRemove(stock.symbol); }}>×</button>
+          </div>
+
+          <div className="category-chips" onClick={e => e.stopPropagation()}>
+            {(stock.themes || []).map(t => (
+              <span key={t} className="category-chip" onClick={() => onEditCategory(stock)}>{t}</span>
+            ))}
+            <span className="category-chip-add" onClick={() => onEditCategory(stock)}>+ category</span>
+          </div>
+
+          <div className="price-row">
+            <span className="price-main">{fmt.price(stock.price, stock.currency)}</span>
+            {stock.change_pct != null && (
+              <span className={`change-pct ${pos ? 'positive' : 'negative'}`}>
+                {fmt.pct(stock.change_pct)}
+              </span>
+            )}
+          </div>
+          {stock.nav_date && (
+            <div style={{fontSize:10, color:'var(--muted)', marginTop:-8, marginBottom:8}}>NAV as of {stock.nav_date}</div>
+          )}
+
+          <div className="metrics-grid">
+            <div className="metric-item">
+              <div className="metric-label">Net Assets</div>
+              <div className="metric-value">{fmt.cap(stock.total_assets)}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Expense Ratio</div>
+              <div className="metric-value">{stock.expense_ratio != null ? (stock.expense_ratio * 100).toFixed(2) + '%' : 'N/A'}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Yield</div>
+              <div className="metric-value">{stock.fund_yield != null ? (stock.fund_yield * 100).toFixed(2) + '%' : 'N/A'}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">YTD Return</div>
+              <div className="metric-value">{stock.ytd_return != null ? (stock.ytd_return * 100).toFixed(1) + '%' : 'N/A'}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Morningstar</div>
+              <div className="metric-value"><MorningstarBadge rating={stock.morningstar_rating} /></div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Category</div>
+              <div className="metric-value" style={{fontSize:11}}>{stock.category || 'N/A'}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">1Y Return</div>
+              <div className="metric-value">{stock.one_year_return != null ? (stock.one_year_return * 100).toFixed(1) + '%' : 'N/A'}</div>
+            </div>
+            <div className="metric-item">
+              <div className="metric-label">Turnover</div>
+              <div className="metric-value">{stock.turnover != null ? (stock.turnover * 100).toFixed(0) + '%' : 'N/A'}</div>
+            </div>
+          </div>
+
+          {stock.fund_family && (
+            <div style={{fontSize:11, color:'var(--muted)', marginTop:4}}>{stock.fund_family}</div>
+          )}
+
+          {stock.last_updated && (
+            <div className="card-footer">Updated {fmt.updated(stock.last_updated)}</div>
+          )}
+        </div>
+      );
+    }
+
+    // ─── FundTableView ────────────────────────────────────────────────────────
+    const FUND_COLUMNS = [
+      { key: 'symbol',           label: 'Symbol',      num: false },
+      { key: 'name',             label: 'Name',        num: false },
+      { key: 'asset_type',       label: 'Type',        num: false },
+      { key: 'price',            label: 'NAV',         num: true  },
+      { key: 'change_pct',       label: 'Change %',    num: true  },
+      { key: 'total_assets',     label: 'Net Assets',  num: true  },
+      { key: 'expense_ratio',    label: 'Exp Ratio',   num: true  },
+      { key: 'fund_yield',       label: 'Yield',       num: true  },
+      { key: 'ytd_return',       label: 'YTD %',       num: true  },
+      { key: 'morningstar_rating', label: 'Morningstar', num: false },
+      { key: 'category',         label: 'Category',    num: false },
+      { key: 'one_year_return',  label: '1Y %',        num: true  },
+      { key: 'three_year_return',label: '3Y %',        num: true  },
+      { key: 'five_year_return', label: '5Y %',        num: true  },
+      { key: 'turnover',         label: 'Turnover',    num: true  },
+    ];
+
+    function FundTableView({ stocks, onRemove, onRowClick, onThemesSaved }) {
+      const [sortKey, setSortKey]           = useState('symbol');
+      const [sortDir, setSortDir]           = useState(1);
+      const [selectedRows, setSelectedRows] = useState(new Set());
+      const [saving, setSaving]             = useState(false);
+      const [saved, setSaved]               = useState(false);
+
+      // Category editor state
+      const [catsToAdd, setCatsToAdd]       = useState([]);
+      const [catsToRemove, setCatsToRemove] = useState(new Set());
+
+      const selectedKey = [...selectedRows].sort().join(',');
+      useEffect(() => {
+        setCatsToAdd([]);
+        setCatsToRemove(new Set());
+        setSaved(false);
+      }, [selectedKey]);
+
+      const handleSort = (key) => {
+        if (sortKey === key) setSortDir(d => -d);
+        else { setSortKey(key); setSortDir(1); }
+      };
+
+      const sorted = [...stocks].sort((a, b) => {
+        let av = a[sortKey], bv = b[sortKey];
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (typeof av === 'string') return sortDir * av.localeCompare(bv);
+        return sortDir * (av - bv);
+      });
+
+      const toggleRow = (symbol, e) => {
+        e.stopPropagation();
+        setSelectedRows(prev => {
+          const next = new Set(prev);
+          next.has(symbol) ? next.delete(symbol) : next.add(symbol);
+          return next;
+        });
+      };
+
+      const allSelected = sorted.length > 0 && sorted.every(s => selectedRows.has(s.symbol));
+      const toggleAll = (e) => {
+        e.stopPropagation();
+        if (allSelected) setSelectedRows(new Set());
+        else setSelectedRows(new Set(sorted.map(s => s.symbol)));
+      };
+
+      const selectedStocks  = stocks.filter(s => selectedRows.has(s.symbol));
+      const existingCats    = [...new Set(selectedStocks.flatMap(s => s.themes || []))];
+      const visibleExisting = existingCats.filter(t => !catsToRemove.has(t));
+      const isDirty         = catsToAdd.length > 0 || catsToRemove.size > 0;
+
+      const queueAdd = (tag) => {
+        const t = tag.trim();
+        if (!t) return;
+        if (catsToRemove.has(t)) {
+          setCatsToRemove(prev => { const n = new Set(prev); n.delete(t); return n; });
+        } else if (!catsToAdd.includes(t) && !existingCats.includes(t)) {
+          setCatsToAdd(prev => [...prev, t]);
+        }
+        setSaved(false);
+      };
+
+      const handleSave = async () => {
+        setSaving(true);
+        for (const stock of selectedStocks) {
+          const current = stock.themes || [];
+          const merged  = [...new Set([...current.filter(t => !catsToRemove.has(t)), ...catsToAdd])];
+          await fetch(`/api/watchlist/${stock.symbol}`, {
+            method: 'PATCH', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ themes: merged }),
+          });
+        }
+        setSaving(false);
+        setSaved(true);
+        setCatsToAdd([]);
+        setCatsToRemove(new Set());
+        onThemesSaved && onThemesSaved([...selectedRows]);
+        setTimeout(() => setSaved(false), 2000);
+      };
+
+      const renderFundCell = (stock, col) => {
+        const v = stock[col.key];
+        switch (col.key) {
+          case 'symbol':      return <td key={col.key} className="sym">{v}</td>;
+          case 'name':        return <td key={col.key} className="name-cell" title={v}>{v}</td>;
+          case 'asset_type':  return <td key={col.key}><TypeBadge type={v} /></td>;
+          case 'price':       return (
+            <td key={col.key} className="num">
+              <div>{fmt.price(v, stock.currency)}</div>
+              {stock.nav_date && <div style={{fontSize:9, color:'var(--muted)'}}>as of {stock.nav_date}</div>}
+            </td>
+          );
+          case 'change_pct':  return (
+            <td key={col.key} className={`num ${v == null ? '' : v >= 0 ? 'positive' : 'negative'}`}>
+              {v != null ? fmt.pct(v) : 'N/A'}
+            </td>
+          );
+          case 'total_assets':   return <td key={col.key} className="num">{fmt.cap(v)}</td>;
+          case 'expense_ratio':  return <td key={col.key} className="num">{v != null ? (v * 100).toFixed(2) + '%' : 'N/A'}</td>;
+          case 'fund_yield':     return <td key={col.key} className="num">{v != null ? (v * 100).toFixed(2) + '%' : 'N/A'}</td>;
+          case 'ytd_return':     return <td key={col.key} className={`num ${v == null ? '' : v >= 0 ? 'positive' : 'negative'}`}>{v != null ? (v * 100).toFixed(1) + '%' : 'N/A'}</td>;
+          case 'morningstar_rating': return <td key={col.key}><MorningstarBadge rating={v} /></td>;
+          case 'category':    return <td key={col.key} style={{fontSize:12, maxWidth:140, overflow:'hidden', textOverflow:'ellipsis'}}>{v || 'N/A'}</td>;
+          case 'one_year_return':    return <td key={col.key} className={`num ${v == null ? '' : v >= 0 ? 'positive' : 'negative'}`}>{v != null ? (v * 100).toFixed(1) + '%' : 'N/A'}</td>;
+          case 'three_year_return':  return <td key={col.key} className={`num ${v == null ? '' : v >= 0 ? 'positive' : 'negative'}`}>{v != null ? (v * 100).toFixed(1) + '%' : 'N/A'}</td>;
+          case 'five_year_return':   return <td key={col.key} className={`num ${v == null ? '' : v >= 0 ? 'positive' : 'negative'}`}>{v != null ? (v * 100).toFixed(1) + '%' : 'N/A'}</td>;
+          case 'turnover':    return <td key={col.key} className="num">{v != null ? (v * 100).toFixed(0) + '%' : 'N/A'}</td>;
+          default:            return <td key={col.key}>{v != null ? String(v) : 'N/A'}</td>;
+        }
+      };
+
+      // Available categories not yet assigned to selection
+      const availableCats = FUND_CATEGORIES.filter(c => !catsToAdd.includes(c) && !existingCats.includes(c));
+
+      return (
+        <>
+          {/* ── Inline Category Editor ── */}
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 10, padding: '14px 18px', marginBottom: 12,
+          }}>
+            <div style={{display:'flex', alignItems:'center', gap:10, marginBottom: selectedRows.size > 0 ? 12 : 0}}>
+              <span style={{fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.5px', whiteSpace:'nowrap'}}>Categories</span>
+              {selectedRows.size === 0 ? (
+                <span style={{fontSize:12, color:'var(--muted)'}}>← Select rows below to assign fund categories</span>
+              ) : (
+                <span style={{fontSize:12, color:'var(--purple)', fontWeight:600}}>
+                  {selectedRows.size} fund{selectedRows.size > 1 ? 's' : ''} selected
+                </span>
+              )}
+              {isDirty && (
+                <button className="btn btn-primary btn-sm" style={{marginLeft:'auto'}}
+                  onClick={handleSave} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+              )}
+              {!isDirty && saved && (
+                <span style={{fontSize:12, color:'var(--green)', marginLeft:'auto'}}>Saved</span>
+              )}
+              {selectedRows.size > 0 && (
+                <button className="btn btn-secondary btn-sm" style={{marginLeft: isDirty || saved ? 8 : 'auto'}}
+                  onClick={() => setSelectedRows(new Set())}>Clear</button>
+              )}
+            </div>
+
+            {selectedRows.size > 0 && (
+              <>
+                {(visibleExisting.length > 0 || catsToRemove.size > 0) && (
+                  <div style={{display:'flex', flexWrap:'wrap', gap:6, marginBottom:10, alignItems:'center'}}>
+                    <span style={{fontSize:11, color:'var(--muted)', whiteSpace:'nowrap', minWidth:56}}>Current:</span>
+                    {visibleExisting.map(t => (
+                      <span key={t} className="theme-chip-removable" style={{fontSize:11}}>
+                        {t}
+                        <button onClick={() => { setCatsToRemove(prev => new Set([...prev, t])); setSaved(false); }}>×</button>
+                      </span>
+                    ))}
+                    {[...catsToRemove].map(t => (
+                      <span key={t} title="Click to undo" style={{
+                        display:'inline-flex', alignItems:'center', gap:5,
+                        background:'#2d1517', border:'1px solid var(--red)', color:'var(--red)',
+                        fontSize:11, fontWeight:600, padding:'3px 8px', borderRadius:14,
+                        textDecoration:'line-through', opacity:0.7, cursor:'pointer',
+                      }} onClick={() => { setCatsToRemove(prev => { const n = new Set(prev); n.delete(t); return n; }); setSaved(false); }}>
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{display:'flex', flexWrap:'wrap', gap:6, alignItems:'center'}}>
+                  <span style={{fontSize:11, color:'var(--muted)', whiteSpace:'nowrap', minWidth:56}}>Add:</span>
+                  {catsToAdd.map(t => (
+                    <span key={t} style={{
+                      display:'inline-flex', alignItems:'center', gap:5,
+                      background:'#1a3020', border:'1px solid var(--green)', color:'var(--green)',
+                      fontSize:11, fontWeight:600, padding:'3px 8px', borderRadius:14,
+                    }}>
+                      +{t}
+                      <button style={{background:'none', border:'none', color:'var(--green)', cursor:'pointer', fontSize:12, lineHeight:1, padding:0}}
+                        onClick={() => { setCatsToAdd(prev => prev.filter(x => x !== t)); setSaved(false); }}>×</button>
+                    </span>
+                  ))}
+                </div>
+
+                {availableCats.length > 0 && (
+                  <div style={{display:'flex', flexWrap:'wrap', gap:6, marginTop:10, alignItems:'center'}}>
+                    <span style={{fontSize:11, color:'var(--muted)', whiteSpace:'nowrap', minWidth:56}}>Assign:</span>
+                    {availableCats.map(c => (
+                      <span key={c} className="suggestion-chip" onClick={() => queueAdd(c)}>+ {c}</span>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* ── Table ── */}
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{width:40, padding:'10px 8px 10px 14px', cursor:'default'}} onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" style={{accentColor:'var(--blue)', cursor:'pointer'}}
+                      checked={allSelected} onChange={toggleAll} />
+                  </th>
+                  {FUND_COLUMNS.map(col => (
+                    <th key={col.key} className={`${col.num ? 'num' : ''} ${sortKey === col.key ? 'sorted' : ''}`}
+                        onClick={() => handleSort(col.key)}>
+                      {col.label}
+                      <span className="sort-arrow">
+                        {sortKey === col.key ? (sortDir === 1 ? '↑' : '↓') : '↕'}
+                      </span>
+                    </th>
+                  ))}
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map(stock => (
+                  <tr key={stock.symbol} onClick={() => onRowClick(stock)}
+                    style={selectedRows.has(stock.symbol) ? {background:'#111c2a'} : {}}>
+                    <td style={{padding:'10px 8px 10px 14px'}}>
+                      <input type="checkbox" style={{accentColor:'var(--blue)', cursor:'pointer'}}
+                        checked={selectedRows.has(stock.symbol)}
+                        onChange={e => toggleRow(stock.symbol, e)}
+                        onClick={e => e.stopPropagation()} />
+                    </td>
+                    {FUND_COLUMNS.map(col => renderFundCell(stock, col))}
+                    <td className="remove-cell">
+                      <button className="row-remove" title="Remove"
+                        onClick={e => { e.stopPropagation(); onRemove(stock.symbol); }}>×</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      );
+    }
+
     // ─── CompetitorModal ─────────────────────────────────────────────────────
     function CompetitorModal({ symbol, onClose, onAddSelected }) {
       const [competitors, setCompetitors] = useState([]);
@@ -1966,6 +2376,7 @@
       const [filter, setFilter]             = useState('ALL');
       const [lastRefresh, setLastRefresh]   = useState(null);
       const [view, setView]                 = useState('cards'); // 'cards' | 'table'
+      const [tab, setTab]                   = useState('stocks'); // 'stocks' | 'funds'
       const [themeStock, setThemeStock]     = useState(null);
       const [activeTheme, setActiveTheme]   = useState(null);
       const [showSetPw, setShowSetPw]       = useState(false);
@@ -2053,11 +2464,22 @@
 
       const allThemes = [...new Set(watchlist.flatMap(s => s.themes || []))].sort();
 
-      const filtered = watchlist
+      // Split watchlist by tab
+      const stockItems = watchlist.filter(s => (s.asset_type || 'EQUITY') !== 'MUTUALFUND');
+      const fundItems  = watchlist.filter(s => s.asset_type === 'MUTUALFUND');
+      const tabItems   = tab === 'funds' ? fundItems : stockItems;
+
+      const filtered = tabItems
         .filter(s => filter === 'ALL' || (s.asset_type || 'EQUITY') === filter)
         .filter(s => !activeTheme || (s.themes || []).includes(activeTheme));
 
-      const types = ['ALL', ...new Set(watchlist.map(s => s.asset_type || 'EQUITY'))];
+      const types = tab === 'funds'
+        ? []
+        : ['ALL', ...new Set(stockItems.map(s => s.asset_type || 'EQUITY'))];
+
+      const fundCategoryThemes = tab === 'funds'
+        ? [...new Set(fundItems.flatMap(s => s.themes || []))].sort()
+        : [];
 
       return (
         <>
@@ -2087,6 +2509,22 @@
             </div>
           </nav>
 
+          {/* Tab bar */}
+          {watchlist.length > 0 && (
+            <div className="tab-bar">
+              <button className={`tab-btn ${tab === 'stocks' ? 'active' : ''}`}
+                onClick={() => { setTab('stocks'); setFilter('ALL'); setActiveTheme(null); }}>
+                Stocks & ETFs
+                {stockItems.length > 0 && <span className="tab-count">{stockItems.length}</span>}
+              </button>
+              <button className={`tab-btn ${tab === 'funds' ? 'active' : ''}`}
+                onClick={() => { setTab('funds'); setFilter('ALL'); setActiveTheme(null); }}>
+                Mutual Funds
+                {fundItems.length > 0 && <span className="tab-count">{fundItems.length}</span>}
+              </button>
+            </div>
+          )}
+
           {/* Refresh shimmer */}
           {refreshing && <div className="refreshing-wrapper"><div className="refreshing-bar" /></div>}
 
@@ -2105,8 +2543,8 @@
             </div>
           )}
 
-          {/* Type filter bar */}
-          {watchlist.length > 0 && (
+          {/* Type filter bar (stocks tab only) */}
+          {tab === 'stocks' && watchlist.length > 0 && types.length > 1 && (
             <div className="filter-bar">
               {types.map(t => (
                 <button key={t} className={`filter-btn ${filter === t ? 'active' : ''}`} onClick={() => setFilter(t)}>
@@ -2116,8 +2554,8 @@
             </div>
           )}
 
-          {/* Theme filter bar */}
-          {allThemes.length > 0 && (
+          {/* Theme / Category filter bar */}
+          {tab === 'stocks' && allThemes.length > 0 && (
             <div className="theme-filter-bar">
               <span className="theme-filter-label">Theme:</span>
               <span
@@ -2136,6 +2574,24 @@
               ))}
             </div>
           )}
+          {tab === 'funds' && fundCategoryThemes.length > 0 && (
+            <div className="theme-filter-bar">
+              <span className="theme-filter-label">Category:</span>
+              <span
+                className={`category-chip ${!activeTheme ? 'active' : ''}`}
+                style={!activeTheme ? {background:'#2d2438', borderColor:'var(--purple)'} : {}}
+                onClick={() => setActiveTheme(null)}>
+                All
+              </span>
+              {fundCategoryThemes.map(t => (
+                <span key={t}
+                  className={`category-chip ${activeTheme === t ? 'active' : ''}`}
+                  onClick={() => setActiveTheme(prev => prev === t ? null : t)}>
+                  {t}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Main */}
           <main className="main">
@@ -2144,16 +2600,35 @@
                 <div className="spinner" />
                 Loading your watchlist…
               </div>
-            ) : filtered.length === 0 && watchlist.length === 0 ? (
+            ) : filtered.length === 0 && tabItems.length === 0 ? (
               <div className="empty-state">
-                <h2>Your watchlist is empty</h2>
-                <p>Add stocks, ETFs, futures, or bonds to get started.</p>
-                <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add your first asset</button>
+                <h2>{tab === 'funds' ? 'No mutual funds tracked yet' : 'Your watchlist is empty'}</h2>
+                <p>{tab === 'funds' ? 'Search for a mutual fund (e.g. VFIAX, FXAIX) to get started.' : 'Add stocks, ETFs, futures, or bonds to get started.'}</p>
+                <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add {tab === 'funds' ? 'a fund' : 'your first asset'}</button>
               </div>
             ) : filtered.length === 0 ? (
               <div className="empty-state">
-                <h2>No {filter} assets tracked</h2>
+                <h2>No matching {tab === 'funds' ? 'funds' : 'assets'}</h2>
                 <p>Try a different filter or add one.</p>
+              </div>
+            ) : tab === 'funds' && view === 'table' ? (
+              <FundTableView
+                stocks={filtered}
+                onRemove={handleRemove}
+                onRowClick={setDetailStock}
+                onThemesSaved={() => fetchWatchlist(true)}
+              />
+            ) : tab === 'funds' ? (
+              <div className="stock-grid">
+                {filtered.map(s => (
+                  <FundCard
+                    key={s.symbol}
+                    stock={s}
+                    onRemove={handleRemove}
+                    onClick={setDetailStock}
+                    onEditCategory={setThemeStock}
+                  />
+                ))}
               </div>
             ) : view === 'table' ? (
               <TableView

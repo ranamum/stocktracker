@@ -131,6 +131,8 @@ def _quotesummary_fallback(symbol):
             'category':                (r.get('fundProfile') or {}).get('categoryName') or v('defaultKeyStatistics', 'category'),
             'yield':                   v('summaryDetail', 'yield'),
             'navPrice':                v('summaryDetail', 'navPrice'),
+            'morningStarOverallRating': v('defaultKeyStatistics', 'morningStarOverallRating'),
+            'annualHoldingsTurnover':   v('defaultKeyStatistics', 'annualHoldingsTurnover'),
         }
         if not info['currentPrice'] and not info['navPrice']:
             return None
@@ -263,6 +265,8 @@ def get_asset_data(symbol):
             'category': info.get('category'),
             'fund_yield': info.get('yield'),
             'nav_price': info.get('navPrice'),
+            'morningstar_rating': info.get('morningStarOverallRating'),
+            'turnover': info.get('annualHoldingsTurnover'),
             'description': (info.get('longBusinessSummary') or '')[:600],
             'website': info.get('website', ''),
             'country': info.get('country', ''),
@@ -270,6 +274,36 @@ def get_asset_data(symbol):
             'last_updated': datetime.now().isoformat(),
             'news': [],
         }
+
+        # Mutual fund extras: 1Y return from history, NAV date
+        if asset_type == 'MUTUALFUND':
+            try:
+                hist = ticker.history(period='1y')
+                if not hist.empty:
+                    data['nav_date'] = str(hist.index[-1].date())
+                    if len(hist) >= 2:
+                        first = float(hist['Close'].iloc[0])
+                        last  = float(hist['Close'].iloc[-1])
+                        if first > 0:
+                            data['one_year_return'] = (last / first - 1)
+            except Exception:
+                pass
+            # Fund description from funds_data if ticker.info had none
+            if not data.get('description'):
+                try:
+                    data['description'] = (ticker.funds_data.description or '')[:600]
+                except Exception:
+                    pass
+            # Fund overview fallback for category/family
+            if not data.get('category') or not data.get('fund_family'):
+                try:
+                    fo = ticker.funds_data.fund_overview
+                    if not data.get('category'):
+                        data['category'] = fo.get('categoryName')
+                    if not data.get('fund_family'):
+                        data['fund_family'] = fo.get('family')
+                except Exception:
+                    pass
 
         # News
         try:
