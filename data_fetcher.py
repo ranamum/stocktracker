@@ -134,10 +134,10 @@ def _quotesummary_fallback(symbol):
             'morningStarOverallRating': v('defaultKeyStatistics', 'morningStarOverallRating'),
             'annualHoldingsTurnover':   v('defaultKeyStatistics', 'annualHoldingsTurnover'),
             # Crypto specific
-            'circulatingSupply':       v('summaryDetail', 'circulatingSupply'),
-            'maxSupply':               v('summaryDetail', 'maxSupply'),
-            'totalSupply':             v('summaryDetail', 'totalSupply'),
-            'volume24Hr':              v('summaryDetail', 'volume24Hr') or v('summaryDetail', 'volumeAllCurrencies'),
+            'circulatingSupply':       v('summaryDetail', 'circulatingSupply') or v('defaultKeyStatistics', 'circulatingSupply'),
+            'maxSupply':               v('summaryDetail', 'maxSupply') or v('defaultKeyStatistics', 'maxSupply'),
+            'totalSupply':             v('summaryDetail', 'totalSupply') or v('defaultKeyStatistics', 'totalSupply'),
+            'volume24Hr':              v('summaryDetail', 'volume24Hr') or v('summaryDetail', 'volumeAllCurrencies') or v('price', 'regularMarketVolume'),
             'fiftyDayAverage':         v('summaryDetail', 'fiftyDayAverage'),
             'twoHundredDayAverage':    v('summaryDetail', 'twoHundredDayAverage'),
         }
@@ -319,8 +319,24 @@ def get_asset_data(symbol):
                 except Exception:
                     pass
 
-        # Crypto extras: 7d and 30d returns from history
+        # Crypto extras
         if asset_type == 'CRYPTOCURRENCY':
+            # Supplement missing fields from quoteSummary (ticker.info often partial on cloud)
+            if not data.get('market_cap') or not data.get('circulating_supply'):
+                try:
+                    qs = _quotesummary_fallback(symbol)
+                    if qs:
+                        for src_key, dst_key in [
+                            ('marketCap', 'market_cap'), ('circulatingSupply', 'circulating_supply'),
+                            ('maxSupply', 'max_supply'), ('totalSupply', 'total_supply'),
+                            ('volume24Hr', 'volume_24h'), ('fiftyDayAverage', 'fifty_day_avg'),
+                            ('twoHundredDayAverage', 'two_hundred_day_avg'),
+                        ]:
+                            if not data.get(dst_key) and qs.get(src_key):
+                                data[dst_key] = qs[src_key]
+                except Exception:
+                    pass
+            # 7d and 30d returns from history
             try:
                 hist = ticker.history(period='1mo')
                 if not hist.empty and len(hist) >= 2:
