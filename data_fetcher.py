@@ -133,6 +133,13 @@ def _quotesummary_fallback(symbol):
             'navPrice':                v('summaryDetail', 'navPrice'),
             'morningStarOverallRating': v('defaultKeyStatistics', 'morningStarOverallRating'),
             'annualHoldingsTurnover':   v('defaultKeyStatistics', 'annualHoldingsTurnover'),
+            # Crypto specific
+            'circulatingSupply':       v('summaryDetail', 'circulatingSupply'),
+            'maxSupply':               v('summaryDetail', 'maxSupply'),
+            'totalSupply':             v('summaryDetail', 'totalSupply'),
+            'volume24Hr':              v('summaryDetail', 'volume24Hr') or v('summaryDetail', 'volumeAllCurrencies'),
+            'fiftyDayAverage':         v('summaryDetail', 'fiftyDayAverage'),
+            'twoHundredDayAverage':    v('summaryDetail', 'twoHundredDayAverage'),
         }
         if not info['currentPrice'] and not info['navPrice']:
             return None
@@ -267,7 +274,14 @@ def get_asset_data(symbol):
             'nav_price': info.get('navPrice'),
             'morningstar_rating': info.get('morningStarOverallRating'),
             'turnover': info.get('annualHoldingsTurnover'),
-            'description': (info.get('longBusinessSummary') or '')[:600],
+            # Crypto specific
+            'circulating_supply': info.get('circulatingSupply'),
+            'max_supply': info.get('maxSupply') or None,  # 0 means unlimited
+            'total_supply': info.get('totalSupply'),
+            'volume_24h': info.get('volume24Hr') or info.get('volumeAllCurrencies'),
+            'fifty_day_avg': info.get('fiftyDayAverage'),
+            'two_hundred_day_avg': info.get('twoHundredDayAverage'),
+            'description': (info.get('longBusinessSummary') or info.get('description') or '')[:600],
             'website': info.get('website', ''),
             'country': info.get('country', ''),
             'employees': info.get('fullTimeEmployees'),
@@ -304,6 +318,24 @@ def get_asset_data(symbol):
                         data['fund_family'] = fo.get('family')
                 except Exception:
                     pass
+
+        # Crypto extras: 7d and 30d returns from history
+        if asset_type == 'CRYPTOCURRENCY':
+            try:
+                hist = ticker.history(period='1mo')
+                if not hist.empty and len(hist) >= 2:
+                    last = float(hist['Close'].iloc[-1])
+                    # 7-day return
+                    if len(hist) >= 7:
+                        price_7d = float(hist['Close'].iloc[-7])
+                        if price_7d > 0:
+                            data['change_7d'] = (last / price_7d - 1)
+                    # 30-day return
+                    first = float(hist['Close'].iloc[0])
+                    if first > 0:
+                        data['change_30d'] = (last / first - 1)
+            except Exception:
+                pass
 
         # News
         try:
